@@ -1,586 +1,328 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Heart, Wind, BookOpen, Phone, AlertCircle, Calendar, User, LogOut, Send, Mic, Play, Pause, X, Wifi, WifiOff } from 'lucide-react';
-import { initializeApp } from "firebase/app";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, doc } from "firebase/firestore";
-
-// --- ⭐ 선생님의 LOVE 프로젝트 비밀 열쇠 (설정 완료) ---
-const firebaseConfig = {
-  apiKey: "AIzaSyATOUHaxLyQpKSnh3tSTKbE545Z3hrpd00",
-  authDomain: "love-c5ddb.firebaseapp.com",
-  projectId: "love-c5ddb",
-  storageBucket: "love-c5ddb.firebasestorage.app",
-  messagingSenderId: "333805011394",
-  appId: "1:333805011394:web:50dcb1c7544ed07f23d65b"
-};
-
-// Firebase 초기화
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// 앱 ID (데이터 저장 경로용 - 임의로 설정 가능)
-const appId = 'mind-garden-class-6-2';
-
-// --- 데이터 및 상수 정의 ---
-
-const MOOD_COLORS = [
-  { id: 'joy', color: 'bg-yellow-300', text: '기쁨/희망', message: '노란 햇살처럼 밝은 마음이구나!' },
-  { id: 'calm', color: 'bg-green-300', text: '평온/휴식', message: '초록 나무처럼 편안한 느낌이네.' },
-  { id: 'sad', color: 'bg-blue-300', text: '슬픔/우울', message: '파란 비가 내리는구나. 괜찮아, 그럴 수 있어.' },
-  { id: 'angry', color: 'bg-red-400', text: '화남/에너지', message: '붉은 불꽃이 일어나는구나. 심호흡을 해볼까?' },
-  { id: 'anxious', color: 'bg-purple-300', text: '불안/고민', message: '보랏빛 안개 속에 있니? 선생님이 손 잡아줄게.' },
-];
-
-const MEDITATION_SCRIPTS = [
-  "자, 편안하게 앉아보자. 선생님이 준 라벤더 오일 향기를 깊게 들이마셔봐... (숨 들이마시기)",
-  "내 마음속에 있는 불안한 풍선이 천천히 바람이 빠져나간다고 상상해봐... (숨 내쉬기)",
-  "너는 안전해. 지금 이 순간, 너의 숨소리에만 집중해 보자."
-];
-
-export default function MindGardenApp() {
-  const [user, setUser] = useState(null);
-  const [userType, setUserType] = useState(null); // 'student' or 'teacher' or null
-  const [moodLogs, setMoodLogs] = useState([]);
-  const [journals, setJournals] = useState([]);
-  const [sosActive, setSosActive] = useState(false);
-  const [isOnline, setIsOnline] = useState(false);
-  const [authError, setAuthError] = useState(null);
-
-  // 1. Auth 초기화 (선생님 프로젝트용 익명 로그인)
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        // 선생님이 설정하신 '익명 로그인'을 시도합니다.
-        await signInAnonymously(auth);
-      } catch (error) {
-        console.error("Auth Error:", error);
-        setAuthError(error.message);
-      }
-    };
-    initAuth();
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>마음 정원 🌱</title>
+    <!-- 1. 디자인 도구 (Tailwind CSS) 가져오기 -->
+    <script src="https://cdn.tailwindcss.com"></script>
     
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setIsOnline(!!u);
-    });
-    return () => unsubscribe();
-  }, []);
+    <!-- 2. 리액트 언어 번역기 (Babel) 가져오기 -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  // 2. 데이터 실시간 동기화 (Firestore)
-  useEffect(() => {
-    if (!user) return;
+    <!-- 3. 애니메이션 효과 -->
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        * { font-family: "Pretendard", sans-serif; }
+        .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+        .animate-bounce-in { animation: bounceIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55); }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes bounceIn { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
 
-    // 감정 로그 불러오기
-    const moodQuery = collection(db, 'artifacts', appId, 'public', 'data', 'mood_logs');
-    const unsubMood = onSnapshot(moodQuery, (snapshot) => {
-      const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // 클라이언트 측 정렬 (최신순)
-      logs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
-      setMoodLogs(logs);
-    }, (error) => console.error("Mood fetch error:", error));
-
-    // 일기 로그 불러오기
-    const journalQuery = collection(db, 'artifacts', appId, 'public', 'data', 'journals');
-    const unsubJournal = onSnapshot(journalQuery, (snapshot) => {
-      const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      logs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
-      setJournals(logs);
-    }, (error) => console.error("Journal fetch error:", error));
-
-    return () => {
-      unsubMood();
-      unsubJournal();
-    };
-  }, [user]);
-
-  // 로그인 화면
-  if (!userType) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-pink-50 p-6 font-sans">
-        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-sm w-full text-center space-y-8 animate-fade-in-up">
-          <div className="space-y-2">
-            <h1 className="text-3xl font-bold text-gray-800">🌱 마음 정원</h1>
-            <p className="text-gray-500">너와 나, 우리가 연결되는 곳</p>
-          </div>
-          
-          <div className="space-y-4">
-            <button 
-              onClick={() => setUserType('student')}
-              className="w-full py-4 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-2xl text-lg font-semibold transition-all transform hover:scale-105 flex items-center justify-center gap-2"
-            >
-              <User size={24} />
-              학생 입장하기
-            </button>
-            <button 
-              onClick={() => setUserType('teacher')}
-              className="w-full py-4 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-2xl text-lg font-semibold transition-all transform hover:scale-105 flex items-center justify-center gap-2"
-            >
-              <BookOpen size={24} />
-              선생님/학부모 입장
-            </button>
-          </div>
-          
-          <div className="flex flex-col items-center justify-center gap-2 text-xs text-gray-400 mt-8">
-             <div className="flex items-center gap-2">
-               {isOnline ? <Wifi size={14} className="text-emerald-500"/> : <WifiOff size={14} className="text-red-400"/>}
-               {isOnline ? "선생님 서버(LOVE) 연결됨" : "서버 연결 중..."}
-             </div>
-             {authError && <p className="text-red-400 text-[10px] max-w-[200px] text-center">오류: 도메인 허용이 필요할 수 있습니다.<br/>({authError})</p>}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="h-full w-full bg-gray-100 flex justify-center overflow-hidden">
-      <div className="w-full max-w-md bg-white h-full shadow-2xl relative flex flex-col">
-        {userType === 'student' ? (
-          <StudentView 
-            moodLogs={moodLogs} 
-            journals={journals}
-            setSosActive={setSosActive}
-            sosActive={sosActive}
-            onLogout={() => setUserType(null)}
-            db={db}
-            appId={appId}
-          />
-        ) : (
-          <TeacherView 
-            moodLogs={moodLogs} 
-            journals={journals}
-            onLogout={() => setUserType(null)}
-            db={db}
-            appId={appId}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// --- 학생용 뷰 ---
-function StudentView({ moodLogs, journals, setSosActive, sosActive, onLogout, db, appId }) {
-  const [activeTab, setActiveTab] = useState('home');
-  const [todayMood, setTodayMood] = useState(null);
-  const [isSaving, setIsSaving] = useState(false);
-  const [latestMessage, setLatestMessage] = useState(null);
-
-  // 선생님 메시지 불러오기 (실시간)
-  useEffect(() => {
-    const msgQuery = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
-    const unsubscribe = onSnapshot(msgQuery, (snapshot) => {
-      const msgs = snapshot.docs.map(doc => doc.data());
-      // 최신순 정렬
-      msgs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
-      if (msgs.length > 0) {
-        setLatestMessage(msgs[0]);
-      }
-    });
-    return () => unsubscribe();
-  }, [db, appId]);
-
-  const handleMoodSelect = async (moodItem) => {
-    setIsSaving(true);
-    try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'mood_logs'), {
-        mood: moodItem.id,
-        note: '', // 추후 노트 추가 가능
-        date: new Date().toLocaleDateString(),
-        timestamp: serverTimestamp(),
-        studentName: '지은'
-      });
-      setTodayMood(moodItem);
-    } catch (e) {
-      alert("저장에 실패했어요. 다시 시도해주세요.");
-    }
-    setIsSaving(false);
-  };
-
-  return (
-    <div className="flex-1 flex flex-col relative bg-amber-50/30">
-      <header className="p-6 pt-12 flex justify-between items-center bg-white shadow-sm rounded-b-3xl z-10">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-800">안녕, 지은아! 👋</h2>
-          <p className="text-gray-500 text-sm">오늘도 너는 소중한 사람이야.</p>
-        </div>
-        <button onClick={onLogout} className="text-gray-400 hover:text-gray-600">
-          <LogOut size={20} />
-        </button>
-      </header>
-
-      <main className="flex-1 overflow-y-auto p-6 space-y-6 pb-24">
-        <button 
-          onClick={() => setSosActive(true)}
-          className="w-full bg-red-100 hover:bg-red-200 text-red-600 p-4 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-sm transition-all animate-pulse"
-        >
-          <AlertCircle size={24} />
-          지금 마음이 너무 힘들어요 (SOS)
-        </button>
-
-        {activeTab === 'home' && (
-          <div className="space-y-6 animate-fade-in">
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-              <h3 className="text-lg font-semibold mb-4 text-gray-700">오늘 너의 마음 색깔은?</h3>
-              {todayMood ? (
-                <div className={`p-6 rounded-2xl ${todayMood.color} text-center space-y-2`}>
-                  <div className="text-3xl">✨</div>
-                  <p className="font-bold text-gray-800 text-lg">{todayMood.text}</p>
-                  <p className="text-gray-800/80 text-sm">{todayMood.message}</p>
-                  <button 
-                    onClick={() => setTodayMood(null)} 
-                    className="text-xs text-gray-600 underline mt-2 block w-full"
-                  >
-                    다시 선택하기
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-5 gap-2">
-                  {MOOD_COLORS.map((mood) => (
-                    <button
-                      key={mood.id}
-                      disabled={isSaving}
-                      onClick={() => handleMoodSelect(mood)}
-                      className={`h-14 w-full rounded-2xl ${mood.color} hover:opacity-80 transition-transform hover:scale-110 shadow-sm disabled:opacity-50`}
-                      aria-label={mood.text}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="bg-blue-50 p-6 rounded-3xl shadow-sm border border-blue-100 relative overflow-hidden transition-all duration-500">
-              <div className="absolute -right-4 -top-4 bg-blue-100 w-24 h-24 rounded-full opacity-50"></div>
-              <h3 className="text-lg font-semibold mb-2 text-blue-800 flex items-center gap-2">
-                <Heart size={18} className="fill-blue-800" /> 선생님의 응원
-              </h3>
-              <p className="text-blue-900 leading-relaxed font-medium">
-                {latestMessage 
-                  ? `"${latestMessage.text}"` 
-                  : `"지은아, 어제 체육 시간에 친구를 도와주는 모습이 정말 멋지더라. 힘든 일이 있으면 언제든 '빈 의자'에 털어놓으렴. 선생님은 늘 네 편이야."`
-                }
-              </p>
-              <p className="text-right text-xs text-blue-400 mt-2">
-                - {latestMessage ? '보건 선생님 (새 메시지)' : '보건 선생님'} -
-              </p>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'meditation' && <MeditationPlayer />}
+    <!-- 4. 여기서부터 진짜 앱 코드입니다 -->
+    <script type="text/babel" data-type="module">
+        // 인터넷에서 필요한 도구들을 직접 가져옵니다 (CDN 방식)
+        import React, { useState, useEffect } from 'https://esm.sh/react@18.2.0';
+        import ReactDOM from 'https://esm.sh/react-dom@18.2.0/client';
+        import { Heart, Wind, BookOpen, Phone, AlertCircle, User, LogOut, Send, Mic, Play, Pause, X, Wifi, WifiOff } from 'https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0';
         
-        {activeTab === 'journal' && <JournalEditor db={db} appId={appId} />}
+        // 파이어베이스 도구 가져오기
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-      </main>
+        // --- ⭐ 선생님의 LOVE 프로젝트 비밀 열쇠 ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyATOUHaxLyQpKSnh3tSTKbE545Z3hrpd00",
+            authDomain: "love-c5ddb.firebaseapp.com",
+            projectId: "love-c5ddb",
+            storageBucket: "love-c5ddb.firebasestorage.app",
+            messagingSenderId: "333805011394",
+            appId: "1:333805011394:web:50dcb1c7544ed07f23d65b"
+        };
 
-      {sosActive && (
-        <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white w-full rounded-3xl p-8 space-y-6 text-center animate-bounce-in relative">
-            <button 
-              onClick={() => setSosActive(false)}
-              className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-            >
-              <X size={24} />
-            </button>
-            <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto">
-              <Phone size={32} />
-            </div>
-            <div>
-              <h3 className="text-2xl font-bold text-gray-800 mb-2">혼자가 아니야</h3>
-              <p className="text-gray-500">지금 바로 목소리를 들려줄래?</p>
-            </div>
-            <div className="space-y-3">
-              <button className="w-full py-4 bg-pink-500 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-pink-600 transition-colors">
-                엄마에게 전화하기
-              </button>
-              <button className="w-full py-4 bg-gray-200 text-gray-700 rounded-xl font-bold text-lg hover:bg-gray-300 transition-colors">
-                상담센터 (1388) 연결
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        // 앱 시작!
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = 'mind-garden-class-6-2';
 
-      <nav className="absolute bottom-0 w-full bg-white border-t border-gray-100 flex justify-around items-center p-4 pb-8 rounded-t-3xl shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
-        <NavButton active={activeTab === 'home'} onClick={() => setActiveTab('home')} icon={<Heart size={24} />} label="홈" />
-        <NavButton active={activeTab === 'meditation'} onClick={() => setActiveTab('meditation')} icon={<Wind size={24} />} label="호흡/명상" />
-        <NavButton active={activeTab === 'journal'} onClick={() => setActiveTab('journal')} icon={<BookOpen size={24} />} label="마음일기" />
-      </nav>
-    </div>
-  );
-}
+        // --- 데이터 정의 ---
+        const MOOD_COLORS = [
+            { id: 'joy', color: 'bg-yellow-300', text: '기쁨/희망', message: '노란 햇살처럼 밝은 마음이구나!' },
+            { id: 'calm', color: 'bg-green-300', text: '평온/휴식', message: '초록 나무처럼 편안한 느낌이네.' },
+            { id: 'sad', color: 'bg-blue-300', text: '슬픔/우울', message: '파란 비가 내리는구나. 괜찮아, 그럴 수 있어.' },
+            { id: 'angry', color: 'bg-red-400', text: '화남/에너지', message: '붉은 불꽃이 일어나는구나. 심호흡을 해볼까?' },
+            { id: 'anxious', color: 'bg-purple-300', text: '불안/고민', message: '보랏빛 안개 속에 있니? 선생님이 손 잡아줄게.' },
+        ];
 
-// --- 선생님용 뷰 ---
-function TeacherView({ moodLogs, journals, onLogout, db, appId }) {
-  const dangerSignals = moodLogs.filter(log => log.mood === 'sad' || log.mood === 'angry').length;
-  const [message, setMessage] = useState('');
+        const MEDITATION_SCRIPTS = [
+            "자, 편안하게 앉아보자. 선생님이 준 라벤더 오일 향기를 깊게 들이마셔봐... (숨 들이마시기)",
+            "내 마음속에 있는 불안한 풍선이 천천히 바람이 빠져나간다고 상상해봐... (숨 내쉬기)",
+            "너는 안전해. 지금 이 순간, 너의 숨소리에만 집중해 보자."
+        ];
 
-  const handleSendMessage = async () => {
-    if(!message.trim()) return;
-    try {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
-            text: message,
-            timestamp: serverTimestamp(),
-            sender: 'teacher',
-            receiver: 'student'
-        });
-        alert("지은이에게 응원 메시지가 실제로 전송되었습니다!");
-        setMessage('');
-    } catch (e) {
-        console.error(e);
-        alert("전송 실패: " + e.message);
-    }
-  };
+        // --- 메인 컴포넌트 ---
+        function MindGardenApp() {
+            const [user, setUser] = useState(null);
+            const [userType, setUserType] = useState(null);
+            const [moodLogs, setMoodLogs] = useState([]);
+            const [sosActive, setSosActive] = useState(false);
+            const [isOnline, setIsOnline] = useState(false);
+            const [authError, setAuthError] = useState(null);
 
-  return (
-    <div className="flex-1 flex flex-col bg-slate-50">
-      <header className="p-6 pt-12 bg-white shadow-sm flex justify-between items-center">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800">👩‍🏫 학생 케어 대시보드</h2>
-          <p className="text-sm text-slate-500 flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            실시간 연동중 • 김지은 학생
-          </p>
-        </div>
-        <button onClick={onLogout} className="text-gray-400 hover:text-gray-600">
-          <LogOut size={20} />
-        </button>
-      </header>
+            // 로그인 처리
+            useEffect(() => {
+                signInAnonymously(auth).catch(e => {
+                    console.error(e);
+                    setAuthError(e.message);
+                });
+                return onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    setIsOnline(!!u);
+                });
+            }, []);
 
-      <main className="p-6 space-y-6 overflow-y-auto pb-10">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-            <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">최근 감정 상태</h4>
-            <div className="flex items-end gap-1 h-16">
-               {moodLogs.slice(0, 5).map((log, idx) => {
-                 const colorClass = MOOD_COLORS.find(c => c.id === log.mood)?.color || 'bg-gray-200';
-                 return (
-                   <div key={idx} className={`flex-1 rounded-t-lg ${colorClass} opacity-80 h-full`} title={log.date}></div>
-                 )
-               })}
-               {moodLogs.length === 0 && <div className="text-xs text-gray-300 w-full text-center self-center">기록 대기중</div>}
-            </div>
-            <p className="text-xs text-slate-400 mt-2 text-right">실시간 반영됨</p>
-          </div>
-          
-          <div className={`p-5 rounded-2xl shadow-sm border ${dangerSignals > 0 ? 'bg-red-50 border-red-100' : 'bg-emerald-50 border-emerald-100'}`}>
-            <h4 className={`text-xs font-bold uppercase mb-2 ${dangerSignals > 0 ? 'text-red-400' : 'text-emerald-400'}`}>관심 필요 지수</h4>
-            <div className="flex items-center gap-2 mt-2">
-              <AlertCircle size={28} className={dangerSignals > 0 ? 'text-red-500' : 'text-emerald-500'} />
-              <span className={`text-2xl font-bold ${dangerSignals > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                {dangerSignals > 0 ? '주의' : '안정'}
-              </span>
-            </div>
-          </div>
-        </div>
+            // 데이터 실시간 연동
+            useEffect(() => {
+                if (!user) return;
+                const moodQuery = collection(db, 'artifacts', appId, 'public', 'data', 'mood_logs');
+                const unsub = onSnapshot(moodQuery, (sn) => {
+                    const logs = sn.docs.map(d => ({id: d.id, ...d.data()})).sort((a,b) => (b.timestamp?.seconds||0)-(a.timestamp?.seconds||0));
+                    setMoodLogs(logs);
+                });
+                return () => unsub();
+            }, [user]);
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="p-4 border-b border-slate-50 flex justify-between items-center">
-            <h3 className="font-bold text-slate-700">📋 실시간 활동 기록</h3>
-          </div>
-          <div className="divide-y divide-slate-50 max-h-60 overflow-y-auto">
-            {/* 감정 로그와 일기를 합쳐서 보여줌 (간단히 구현) */}
-            {moodLogs.map((log, idx) => {
-              const moodData = MOOD_COLORS.find(c => c.id === log.mood);
-              return (
-                <div key={log.id} className="p-4 hover:bg-slate-50 transition-colors animate-fade-in">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className={`w-3 h-3 rounded-full ${moodData?.color}`}></div>
-                    <span className="text-sm font-semibold text-slate-700">감정 체크</span>
-                    <span className="text-xs text-slate-400 ml-auto">
-                      {log.timestamp ? new Date(log.timestamp.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '방금 전'}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-600 pl-6 border-l-2 border-slate-100">
-                     <span className="font-medium text-slate-800">[{moodData?.text}]</span> 를 선택했습니다.
-                  </p>
+            // 로그인 화면 렌더링
+            if (!userType) {
+                return (
+                    <div className="flex flex-col items-center justify-center h-screen bg-pink-50 p-6">
+                        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-sm w-full text-center space-y-8 animate-fade-in">
+                            <div className="space-y-2">
+                                <h1 className="text-3xl font-bold text-gray-800">🌱 마음 정원</h1>
+                                <p className="text-gray-500">너와 나, 우리가 연결되는 곳</p>
+                            </div>
+                            <div className="space-y-4">
+                                <button onClick={() => setUserType('student')} className="w-full py-4 bg-emerald-100 text-emerald-800 rounded-2xl font-bold flex justify-center gap-2 hover:scale-105 transition-transform">
+                                    <User size={24} /> 학생 입장하기
+                                </button>
+                                <button onClick={() => setUserType('teacher')} className="w-full py-4 bg-blue-100 text-blue-800 rounded-2xl font-bold flex justify-center gap-2 hover:scale-105 transition-transform">
+                                    <BookOpen size={24} /> 선생님 입장
+                                </button>
+                            </div>
+                            <div className="text-xs text-gray-400 mt-4">
+                                {isOnline ? <span className="text-emerald-500 flex justify-center items-center gap-1"><Wifi size={12}/> 서버 연결됨</span> : "연결 중..."}
+                                {authError && <div className="text-red-400 mt-1">오류: 도메인 허용 필요 ({authError})</div>}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="h-screen w-full flex justify-center bg-gray-100 overflow-hidden">
+                    <div className="w-full max-w-md bg-white h-full shadow-2xl relative flex flex-col">
+                        {userType === 'student' 
+                            ? <StudentView moodLogs={moodLogs} setSosActive={setSosActive} sosActive={sosActive} onLogout={() => setUserType(null)} db={db} appId={appId} />
+                            : <TeacherView moodLogs={moodLogs} onLogout={() => setUserType(null)} db={db} appId={appId} />
+                        }
+                    </div>
                 </div>
-              );
-            })}
-             {moodLogs.length === 0 && <div className="p-8 text-center text-slate-400">아직 활동 기록이 없습니다.</div>}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-           <h3 className="font-bold text-slate-700 mb-3">💌 격려 메시지 보내기</h3>
-           <textarea 
-             value={message}
-             onChange={(e) => setMessage(e.target.value)}
-             className="w-full bg-slate-50 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
-             rows="3"
-             placeholder="지은이에게 따뜻한 한마디를 적어주세요..."
-           ></textarea>
-           <button 
-             onClick={handleSendMessage}
-             className="w-full mt-3 bg-blue-500 text-white py-3 rounded-xl font-bold shadow-md hover:bg-blue-600 transition-colors flex items-center justify-center gap-2"
-           >
-             <Send size={18} /> 메시지 전송
-           </button>
-        </div>
-      </main>
-    </div>
-  );
-}
-
-// --- 하위 컴포넌트: 명상 플레이어 ---
-function MeditationPlayer() {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [timer, setTimer] = useState(180); 
-  const [scriptIndex, setScriptIndex] = useState(0);
-
-  useEffect(() => {
-    let interval;
-    if (isPlaying && timer > 0) {
-      interval = setInterval(() => {
-        setTimer((prev) => prev - 1);
-        if(timer % 10 === 0 && scriptIndex < MEDITATION_SCRIPTS.length - 1) {
-             setScriptIndex(prev => (prev + 1) % MEDITATION_SCRIPTS.length);
+            );
         }
-      }, 1000);
-    } else if (timer === 0) {
-      setIsPlaying(false);
-    }
-    return () => clearInterval(interval);
-  }, [isPlaying, timer, scriptIndex]);
 
-  const formatTime = (seconds) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
+        // --- 학생 화면 ---
+        function StudentView({ moodLogs, setSosActive, sosActive, onLogout, db, appId }) {
+            const [activeTab, setActiveTab] = useState('home');
+            const [todayMood, setTodayMood] = useState(null);
+            const [latestMessage, setLatestMessage] = useState(null);
 
-  return (
-    <div className="h-full flex flex-col items-center justify-center space-y-8 p-4">
-      <div className="text-center space-y-2">
-        <h3 className="text-2xl font-bold text-gray-700">뇌호흡 명상</h3>
-        <p className="text-gray-500 text-sm">아로마 향을 느끼며 호흡에 집중해봐요.</p>
-      </div>
-      <div className="relative flex items-center justify-center">
-        <div className={`w-48 h-48 rounded-full bg-emerald-100 flex items-center justify-center transition-all duration-[4000ms] ease-in-out ${isPlaying ? 'scale-125 bg-emerald-200' : 'scale-100'}`}>
-          <div className={`w-32 h-32 rounded-full bg-emerald-300 flex items-center justify-center transition-all duration-[4000ms] ease-in-out ${isPlaying ? 'scale-110 opacity-80' : 'scale-100 opacity-100'}`}>
-            <span className="text-3xl font-mono font-bold text-white drop-shadow-md">
-              {formatTime(timer)}
-            </span>
-          </div>
-        </div>
-        {isPlaying && (
-           <div className="absolute -bottom-12 text-sm text-emerald-600 animate-pulse font-medium bg-emerald-50 px-3 py-1 rounded-full">
-             🌿 숨을 들이마시고... 내쉬세요...
-           </div>
-        )}
-      </div>
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 w-full text-center min-h-[80px] flex items-center justify-center">
-        <p className="text-gray-600 font-medium">"{MEDITATION_SCRIPTS[scriptIndex]}"</p>
-      </div>
-      <button 
-        onClick={() => setIsPlaying(!isPlaying)}
-        className={`rounded-full p-6 shadow-lg transition-transform hover:scale-105 active:scale-95 ${isPlaying ? 'bg-orange-100 text-orange-500' : 'bg-emerald-500 text-white'}`}
-      >
-        {isPlaying ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" className="ml-1" />}
-      </button>
-    </div>
-  );
-}
+            useEffect(() => {
+                const q = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
+                return onSnapshot(q, (sn) => {
+                    const msgs = sn.docs.map(d => d.data()).sort((a,b) => (b.timestamp?.seconds||0)-(a.timestamp?.seconds||0));
+                    if(msgs.length > 0) setLatestMessage(msgs[0]);
+                });
+            }, []);
 
-// --- 하위 컴포넌트: 감정 일기 (빈 의자 기법 - DB 저장 연동) ---
-function JournalEditor({ db, appId }) {
-  const [mode, setMode] = useState('gratitude'); 
-  const [text, setText] = useState('');
-  const [recentLogs, setRecentLogs] = useState([]);
+            const handleMood = async (mood) => {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'mood_logs'), {
+                    mood: mood.id, date: new Date().toLocaleDateString(), timestamp: serverTimestamp(), studentName: '지은'
+                });
+                setTodayMood(mood);
+            };
 
-  // 내 로컬에서 작성한 내용만 잠깐 보여주기 위한 state (실제로는 전체 리스트에서 필터링해서 보여주는게 좋음)
-  
-  const handleSave = async () => {
-    if (!text.trim()) return;
-    try {
-      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'journals'), {
-        type: mode,
-        text: text,
-        date: new Date().toLocaleDateString(),
-        timestamp: serverTimestamp(),
-        studentName: '지은'
-      });
-      
-      setRecentLogs([{id: docRef.id, text, date: '방금', type: mode}, ...recentLogs]);
-      setText('');
-      alert(mode === 'gratitude' ? '감사 일기가 저장되었어요! 꽃이 피어났습니다. 🌸' : '속마음을 털어놓으니 한결 가벼워졌나요? 잘했어요.');
-    } catch (e) {
-      console.error(e);
-      alert("저장 중 오류가 발생했습니다.");
-    }
-  };
+            return (
+                <div className="flex-1 flex flex-col relative bg-amber-50/30">
+                    <header className="p-6 pt-12 flex justify-between bg-white shadow-sm rounded-b-3xl z-10">
+                        <div><h2 className="text-2xl font-bold text-gray-800">안녕, 지은아! 👋</h2><p className="text-sm text-gray-500">오늘도 소중한 하루야</p></div>
+                        <button onClick={onLogout}><LogOut className="text-gray-400" /></button>
+                    </header>
 
-  return (
-    <div className="h-full flex flex-col space-y-4">
-      <div className="flex bg-white p-1 rounded-2xl border border-gray-200">
-        <button 
-          onClick={() => setMode('gratitude')}
-          className={`flex-1 py-2 rounded-xl text-sm font-bold transition-colors ${mode === 'gratitude' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-400 hover:bg-gray-50'}`}
-        >
-          🙏 감사 일기
-        </button>
-        <button 
-          onClick={() => setMode('emptyChair')}
-          className={`flex-1 py-2 rounded-xl text-sm font-bold transition-colors ${mode === 'emptyChair' ? 'bg-purple-100 text-purple-700' : 'text-gray-400 hover:bg-gray-50'}`}
-        >
-          🪑 속마음 의자
-        </button>
-      </div>
+                    <main className="flex-1 overflow-y-auto p-6 pb-24 space-y-6">
+                        <button onClick={() => setSosActive(true)} className="w-full bg-red-100 text-red-600 p-4 rounded-2xl font-bold flex justify-center gap-2 animate-pulse">
+                            <AlertCircle /> 지금 마음이 너무 힘들어요 (SOS)
+                        </button>
 
-      <div className="flex-1 bg-white rounded-3xl p-6 shadow-sm border border-gray-100 flex flex-col">
-        <div className="mb-4">
-          <h3 className="text-lg font-bold text-gray-800">
-            {mode === 'gratitude' ? '오늘 감사한 일을 찾아볼까요?' : '빈 의자에 앉아 속마음을 말해봐요.'}
-          </h3>
-          <p className="text-sm text-gray-400">
-            {mode === 'gratitude' ? '아주 사소한 것도 괜찮아요.' : '누구에게도 말하지 못한 이야기, 여기서 다 털어놓으세요.'}
-          </p>
-        </div>
+                        {activeTab === 'home' && (
+                            <div className="space-y-6 animate-fade-in">
+                                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                                    <h3 className="font-bold text-gray-700 mb-4">오늘 마음 색깔은?</h3>
+                                    {todayMood ? (
+                                        <div className={`p-6 rounded-2xl ${todayMood.color} text-center space-y-2`}>
+                                            <div className="text-3xl">✨</div>
+                                            <p className="font-bold text-gray-800">{todayMood.text}</p>
+                                            <p className="text-sm text-gray-800/80">{todayMood.message}</p>
+                                            <button onClick={() => setTodayMood(null)} className="text-xs underline mt-2">다시 선택하기</button>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-5 gap-2">
+                                            {MOOD_COLORS.map(m => (
+                                                <button key={m.id} onClick={() => handleMood(m)} className={`h-14 rounded-2xl ${m.color} hover:scale-110 transition-transform shadow-sm`} />
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="bg-blue-50 p-6 rounded-3xl shadow-sm border border-blue-100 relative overflow-hidden">
+                                    <h3 className="text-blue-800 font-bold mb-2 flex items-center gap-2"><Heart size={16} fill="currentColor"/> 선생님의 응원</h3>
+                                    <p className="text-blue-900 font-medium">"{latestMessage ? latestMessage.text : "지은아, 힘들면 언제든 빈 의자에 털어놓으렴. 선생님은 늘 네 편이야."}"</p>
+                                </div>
+                            </div>
+                        )}
+                        {activeTab === 'meditation' && <MeditationPlayer />}
+                        {activeTab === 'journal' && <JournalEditor db={db} appId={appId} />}
+                    </main>
 
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          className="flex-1 w-full resize-none focus:outline-none text-gray-600 leading-relaxed placeholder-gray-300"
-          placeholder={mode === 'gratitude' ? "예: 오늘 급식에 맛있는 반찬이 나와서 좋았다." : "지금 내 앞에 엄마가/친구가 앉아있다고 상상해봐. 하고 싶은 말을 적어보자..."}
-        ></textarea>
+                    {sosActive && (
+                        <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 backdrop-blur-sm animate-fade-in">
+                            <div className="bg-white w-full rounded-3xl p-8 text-center relative animate-bounce-in">
+                                <button onClick={() => setSosActive(false)} className="absolute top-4 right-4 p-2 text-gray-400"><X /></button>
+                                <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4"><Phone size={32}/></div>
+                                <h3 className="text-2xl font-bold mb-2">혼자가 아니야</h3>
+                                <div className="space-y-3 mt-6">
+                                    <button className="w-full py-4 bg-pink-500 text-white rounded-xl font-bold shadow-lg">엄마에게 전화하기</button>
+                                    <button className="w-full py-4 bg-gray-200 text-gray-700 rounded-xl font-bold">상담센터 (1388)</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
-        <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-100">
-           <button className="p-3 text-gray-400 hover:bg-gray-100 rounded-full">
-             <Mic size={20} />
-           </button>
-           <button 
-             onClick={handleSave}
-             className={`px-6 py-2 rounded-full text-white font-bold shadow-md transition-transform active:scale-95 ${mode === 'gratitude' ? 'bg-yellow-400 hover:bg-yellow-500' : 'bg-purple-400 hover:bg-purple-500'}`}
-           >
-             저장하기
-           </button>
-        </div>
-      </div>
-      
-      <div className="h-32 overflow-y-auto space-y-2">
-        {recentLogs.filter(j => j.type === mode).map(j => (
-          <div key={j.id} className="bg-white p-3 rounded-xl text-sm text-gray-600 border border-gray-100 truncate animate-fade-in">
-            <span className="text-xs text-gray-400 mr-2">{j.date}</span>
-            {j.text}
-          </div>
-        ))}
-         {recentLogs.length === 0 && <div className="text-center text-xs text-gray-300 py-4">방금 쓴 내용이 여기에 나타나요</div>}
-      </div>
-    </div>
-  );
-}
+                    <nav className="absolute bottom-0 w-full bg-white border-t border-gray-100 flex justify-around p-4 pb-8 rounded-t-3xl">
+                        <NavButton active={activeTab==='home'} onClick={()=>setActiveTab('home')} icon={<Heart/>} label="홈" />
+                        <NavButton active={activeTab==='meditation'} onClick={()=>setActiveTab('meditation')} icon={<Wind/>} label="명상" />
+                        <NavButton active={activeTab==='journal'} onClick={()=>setActiveTab('journal')} icon={<BookOpen/>} label="일기" />
+                    </nav>
+                </div>
+            );
+        }
 
-function NavButton({ active, onClick, icon, label }) {
-  return (
-    <button 
-      onClick={onClick}
-      className={`flex flex-col items-center gap-1 transition-all duration-300 ${active ? 'text-gray-800 -translate-y-2' : 'text-gray-300'}`}
-    >
-      <div className={`p-2 rounded-2xl ${active ? 'bg-yellow-300 shadow-md' : 'bg-transparent'}`}>
-        {icon}
-      </div>
-      <span className="text-[10px] font-bold">{label}</span>
-    </button>
-  );
-}
+        // --- 선생님 화면 ---
+        function TeacherView({ moodLogs, onLogout, db, appId }) {
+            const [msg, setMsg] = useState('');
+            const dangerCount = moodLogs.filter(l => l.mood === 'sad' || l.mood === 'angry').length;
+
+            const sendMsg = async () => {
+                if(!msg.trim()) return;
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+                    text: msg, timestamp: serverTimestamp(), sender: 'teacher'
+                });
+                alert("전송 완료!"); setMsg('');
+            };
+
+            return (
+                <div className="flex-1 flex flex-col bg-slate-50">
+                    <header className="p-6 pt-12 bg-white shadow-sm flex justify-between">
+                        <div><h2 className="text-xl font-bold">👩‍🏫 학생 케어 대시보드</h2><p className="text-sm text-slate-500">김지은 학생 (실시간)</p></div>
+                        <button onClick={onLogout}><LogOut className="text-gray-400"/></button>
+                    </header>
+                    <main className="p-6 space-y-6 flex-1 overflow-y-auto">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                                <h4 className="text-xs font-bold text-slate-400 mb-2">최근 감정</h4>
+                                <div className="flex items-end h-12 gap-1">
+                                    {moodLogs.slice(0,5).map((l,i) => (
+                                        <div key={i} className={`flex-1 rounded-t-lg h-full opacity-80 ${MOOD_COLORS.find(c=>c.id===l.mood)?.color || 'bg-gray-200'}`}></div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className={`p-4 rounded-2xl border ${dangerCount>0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                                <h4 className="text-xs font-bold mb-2">관심 필요 지수</h4>
+                                <div className="flex items-center gap-2 text-2xl font-bold">
+                                    <AlertCircle className={dangerCount>0?'text-red-500':'text-emerald-500'} />
+                                    <span className={dangerCount>0?'text-red-600':'text-emerald-600'}>{dangerCount>0?'주의':'안정'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                            <h3 className="font-bold mb-3">💌 격려 메시지</h3>
+                            <textarea value={msg} onChange={e=>setMsg(e.target.value)} className="w-full bg-slate-50 rounded-xl p-3 text-sm resize-none mb-2" rows="3" placeholder="지은이에게 보낼 응원..."></textarea>
+                            <button onClick={sendMsg} className="w-full bg-blue-500 text-white py-3 rounded-xl font-bold flex justify-center gap-2"><Send size={18}/> 전송</button>
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        // --- 기타 컴포넌트 ---
+        function MeditationPlayer() {
+            const [play, setPlay] = useState(false);
+            const [time, setTime] = useState(180);
+            
+            useEffect(() => {
+                let i; 
+                if(play && time > 0) i = setInterval(() => setTime(t => t-1), 1000);
+                return () => clearInterval(i);
+            }, [play, time]);
+
+            return (
+                <div className="h-full flex flex-col items-center justify-center space-y-8 p-4">
+                    <div className="text-center"><h3 className="text-2xl font-bold">뇌호흡 명상</h3><p className="text-gray-500">호흡에 집중해보세요</p></div>
+                    <div className={`w-48 h-48 rounded-full bg-emerald-100 flex items-center justify-center transition-all duration-[4000ms] ${play?'scale-110':''}`}>
+                        <div className="text-3xl font-bold text-emerald-600">{Math.floor(time/60)}:{(time%60).toString().padStart(2,'0')}</div>
+                    </div>
+                    <button onClick={() => setPlay(!play)} className="bg-emerald-500 text-white p-4 rounded-full shadow-lg">
+                        {play ? <Pause fill="white"/> : <Play fill="white" className="ml-1"/>}
+                    </button>
+                </div>
+            );
+        }
+
+        function JournalEditor({ db, appId }) {
+            const [mode, setMode] = useState('gratitude');
+            const [txt, setTxt] = useState('');
+            const save = async () => {
+                if(!txt.trim()) return;
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'journals'), {
+                    type: mode, text: txt, date: new Date().toLocaleDateString(), timestamp: serverTimestamp()
+                });
+                alert("저장되었어요! 🌸"); setTxt('');
+            };
+            return (
+                <div className="h-full flex flex-col space-y-4">
+                    <div className="flex bg-white p-1 rounded-2xl border">
+                        <button onClick={()=>setMode('gratitude')} className={`flex-1 py-2 rounded-xl font-bold text-sm ${mode==='gratitude'?'bg-yellow-100 text-yellow-700':'text-gray-400'}`}>🙏 감사 일기</button>
+                        <button onClick={()=>setMode('emptyChair')} className={`flex-1 py-2 rounded-xl font-bold text-sm ${mode==='emptyChair'?'bg-purple-100 text-purple-700':'text-gray-400'}`}>🪑 속마음 의자</button>
+                    </div>
+                    <div className="flex-1 bg-white rounded-3xl p-6 border border-gray-100 flex flex-col">
+                        <textarea value={txt} onChange={e=>setTxt(e.target.value)} className="flex-1 resize-none focus:outline-none" placeholder={mode==='gratitude'?"오늘 고마웠던 일은?":"누구에게도 못한 말..."}></textarea>
+                        <div className="flex justify-end pt-4"><button onClick={save} className="bg-yellow-400 text-white px-6 py-2 rounded-full font-bold shadow-md">저장</button></div>
+                    </div>
+                </div>
+            );
+        }
+
+        function NavButton({ active, onClick, icon, label }) {
+            return <button onClick={onClick} className={`flex flex-col items-center gap-1 ${active?'text-gray-800':'text-gray-300'}`}><div className={active?'bg-yellow-300 p-2 rounded-2xl shadow-md':'p-2'}>{icon}</div><span className="text-[10px] font-bold">{label}</span></button>;
+        }
+
+        // 화면에 앱 그리기
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<MindGardenApp />);
+    </script>
+</body>
+</html>
