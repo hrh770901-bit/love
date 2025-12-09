@@ -1,483 +1,586 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>나의 조각 찾기: 마음 봄 프로젝트 성찰</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+import React, { useState, useEffect, useRef } from 'react';
+import { Heart, Wind, BookOpen, Phone, AlertCircle, Calendar, User, LogOut, Send, Mic, Play, Pause, X, Wifi, WifiOff } from 'lucide-react';
+import { initializeApp } from "firebase/app";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, doc } from "firebase/firestore";
+
+// --- ⭐ 선생님의 LOVE 프로젝트 비밀 열쇠 (설정 완료) ---
+const firebaseConfig = {
+  apiKey: "AIzaSyATOUHaxLyQpKSnh3tSTKbE545Z3hrpd00",
+  authDomain: "love-c5ddb.firebaseapp.com",
+  projectId: "love-c5ddb",
+  storageBucket: "love-c5ddb.firebasestorage.app",
+  messagingSenderId: "333805011394",
+  appId: "1:333805011394:web:50dcb1c7544ed07f23d65b"
+};
+
+// Firebase 초기화
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// 앱 ID (데이터 저장 경로용 - 임의로 설정 가능)
+const appId = 'mind-garden-class-6-2';
+
+// --- 데이터 및 상수 정의 ---
+
+const MOOD_COLORS = [
+  { id: 'joy', color: 'bg-yellow-300', text: '기쁨/희망', message: '노란 햇살처럼 밝은 마음이구나!' },
+  { id: 'calm', color: 'bg-green-300', text: '평온/휴식', message: '초록 나무처럼 편안한 느낌이네.' },
+  { id: 'sad', color: 'bg-blue-300', text: '슬픔/우울', message: '파란 비가 내리는구나. 괜찮아, 그럴 수 있어.' },
+  { id: 'angry', color: 'bg-red-400', text: '화남/에너지', message: '붉은 불꽃이 일어나는구나. 심호흡을 해볼까?' },
+  { id: 'anxious', color: 'bg-purple-300', text: '불안/고민', message: '보랏빛 안개 속에 있니? 선생님이 손 잡아줄게.' },
+];
+
+const MEDITATION_SCRIPTS = [
+  "자, 편안하게 앉아보자. 선생님이 준 라벤더 오일 향기를 깊게 들이마셔봐... (숨 들이마시기)",
+  "내 마음속에 있는 불안한 풍선이 천천히 바람이 빠져나간다고 상상해봐... (숨 내쉬기)",
+  "너는 안전해. 지금 이 순간, 너의 숨소리에만 집중해 보자."
+];
+
+export default function MindGardenApp() {
+  const [user, setUser] = useState(null);
+  const [userType, setUserType] = useState(null); // 'student' or 'teacher' or null
+  const [moodLogs, setMoodLogs] = useState([]);
+  const [journals, setJournals] = useState([]);
+  const [sosActive, setSosActive] = useState(false);
+  const [isOnline, setIsOnline] = useState(false);
+  const [authError, setAuthError] = useState(null);
+
+  // 1. Auth 초기화 (선생님 프로젝트용 익명 로그인)
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        // 선생님이 설정하신 '익명 로그인'을 시도합니다.
+        await signInAnonymously(auth);
+      } catch (error) {
+        console.error("Auth Error:", error);
+        setAuthError(error.message);
+      }
+    };
+    initAuth();
     
-    <!-- Google Fonts -->
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setIsOnline(!!u);
+    });
+    return () => unsubscribe();
+  }, []);
 
-        body {
-            font-family: 'Noto Sans KR', sans-serif;
-            background-color: #FDFBF7;
-            color: #4A4A4A;
-        }
+  // 2. 데이터 실시간 동기화 (Firestore)
+  useEffect(() => {
+    if (!user) return;
 
-        /* --- 스타일 정의 --- */
-        .chart-container {
-            position: relative;
-            width: 100%;
-            max-width: 600px;
-            margin: 0 auto;
-            height: 300px;
-        }
-        @media (min-width: 768px) { .chart-container { height: 350px; } }
-        
-        /* 스크롤바 */
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; }
-        ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+    // 감정 로그 불러오기
+    const moodQuery = collection(db, 'artifacts', appId, 'public', 'data', 'mood_logs');
+    const unsubMood = onSnapshot(moodQuery, (snapshot) => {
+      const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // 클라이언트 측 정렬 (최신순)
+      logs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+      setMoodLogs(logs);
+    }, (error) => console.error("Mood fetch error:", error));
 
-        /* 애니메이션 및 효과 */
-        .piece-card { transition: all 0.3s ease; }
-        .piece-card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
-        .fade-in { animation: fadeIn 0.8s ease-out forwards; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    // 일기 로그 불러오기
+    const journalQuery = collection(db, 'artifacts', appId, 'public', 'data', 'journals');
+    const unsubJournal = onSnapshot(journalQuery, (snapshot) => {
+      const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      logs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+      setJournals(logs);
+    }, (error) => console.error("Journal fetch error:", error));
 
-        /* 모자이크 조각 */
-        .mosaic-piece { transition: all 0.5s ease; position: relative; }
-        .mosaic-piece:hover { transform: scale(1.05); z-index: 10; }
+    return () => {
+      unsubMood();
+      unsubJournal();
+    };
+  }, [user]);
 
-        /* 입력창 스타일 */
-        textarea.reflection-input {
-            width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #E5E7EB;
-            resize: vertical; font-size: 0.9rem; min-height: 80px; transition: border-color 0.3s;
-        }
-        textarea.reflection-input:focus { outline: none; border-color: #F28C8C; box-shadow: 0 0 0 3px rgba(242, 140, 140, 0.2); }
-        input.detail-input { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #D1D5DB; font-size: 0.9rem; }
-
-        /* 조각 시뮬레이션 스타일 */
-        .piece-base {
-            transition: all 0.5s ease; width: 180px; height: 180px;
-            background-color: var(--piece-color, #E74C3C);
-            display: flex; align-items: center; justify-content: center; position: relative;
-        }
-        .shape-square { border-radius: 8px; }
-        .shape-circle { border-radius: 50%; }
-        .piece-icon { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1; }
-        .bounce { animation: bounce 0.6s ease-out; }
-        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
-
-        /* 인쇄 스타일 */
-        @media print {
-            body > :not(.print-container) { display: none !important; }
-            .print-container { display: block !important; position: absolute; top: 0; left: 0; width: 100%; background: white; color: black; }
-            .print-report-card { page-break-after: always; border: 1px solid #ccc; margin-bottom: 20px; padding: 20px; }
-            .print-header { font-size: 1.5rem; font-weight: bold; border-bottom: 2px solid #333; margin-bottom: 10px; }
-        }
-    </style>
-
-    <!-- Firebase 설정 및 초기화 -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, collection, addDoc, query, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-        // 선생님께서 주신 정보가 여기에 입력되었습니다!
-        const firebaseConfig = {
-          apiKey: "AIzaSyAkKXNNA6YMDc9yRsCZ8PYDQAANv4xTulc",
-          authDomain: "total-a4edf.firebaseapp.com",
-          projectId: "total-a4edf",
-          storageBucket: "total-a4edf.firebasestorage.app",
-          messagingSenderId: "636476842816",
-          appId: "1:636476842816:web:093fdccdda2ea285bd10a5",
-          measurementId: "G-5LHR1DFT00"
-        };
-
-        // Firebase 초기화
-        if (firebaseConfig.apiKey) {
-            const app = initializeApp(firebaseConfig);
-            const auth = getAuth(app);
-            const db = getFirestore(app);
-
-            // 전역 변수로 할당
-            window.db = db;
-            window.auth = auth;
-            window.firebaseFunctions = { collection, addDoc, query, getDocs, serverTimestamp };
-
-            // 익명 로그인
-            signInAnonymously(auth).then(() => {
-                console.log("익명 로그인 성공");
-            }).catch((error) => {
-                console.error("로그인 실패:", error);
-            });
-
-            onAuthStateChanged(auth, (user) => {
-                if (user) {
-                    window.userId = user.uid;
-                    console.log("User ID:", window.userId);
-                }
-            });
-        }
-    </script>
-</head>
-<body class="antialiased">
-
-    <!-- 네비게이션 -->
-    <nav class="sticky top-0 z-50 bg-[#FDFBF7]/90 backdrop-blur-md border-b border-gray-200 shadow-sm">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16 items-center">
-                <div class="flex items-center">
-                    <span class="text-2xl mr-2">🧩</span>
-                    <h1 class="text-xl font-bold text-gray-800 tracking-tight">나의 조각 찾기 <span class="text-sm font-normal text-gray-500 hidden sm:inline">| 마음 봄 프로젝트</span></h1>
-                </div>
-                <div class="flex space-x-4 text-sm font-medium">
-                    <button onclick="scrollToSection('intro')" class="hover:text-[#F28C8C] transition-colors">소개</button>
-                    <button onclick="scrollToSection('phase1')" class="hover:text-[#F28C8C] transition-colors">나의 발견</button>
-                    <button onclick="scrollToSection('phase2')" class="hover:text-[#F28C8C] transition-colors">우리와 긍정</button>
-                    <button onclick="scrollToSection('phase3')" class="hover:text-[#F28C8C] transition-colors">미래와 성장</button>
-                </div>
-            </div>
+  // 로그인 화면
+  if (!userType) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-pink-50 p-6 font-sans">
+        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-sm w-full text-center space-y-8 animate-fade-in-up">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold text-gray-800">🌱 마음 정원</h1>
+            <p className="text-gray-500">너와 나, 우리가 연결되는 곳</p>
+          </div>
+          
+          <div className="space-y-4">
+            <button 
+              onClick={() => setUserType('student')}
+              className="w-full py-4 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-2xl text-lg font-semibold transition-all transform hover:scale-105 flex items-center justify-center gap-2"
+            >
+              <User size={24} />
+              학생 입장하기
+            </button>
+            <button 
+              onClick={() => setUserType('teacher')}
+              className="w-full py-4 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-2xl text-lg font-semibold transition-all transform hover:scale-105 flex items-center justify-center gap-2"
+            >
+              <BookOpen size={24} />
+              선생님/학부모 입장
+            </button>
+          </div>
+          
+          <div className="flex flex-col items-center justify-center gap-2 text-xs text-gray-400 mt-8">
+             <div className="flex items-center gap-2">
+               {isOnline ? <Wifi size={14} className="text-emerald-500"/> : <WifiOff size={14} className="text-red-400"/>}
+               {isOnline ? "선생님 서버(LOVE) 연결됨" : "서버 연결 중..."}
+             </div>
+             {authError && <p className="text-red-400 text-[10px] max-w-[200px] text-center">오류: 도메인 허용이 필요할 수 있습니다.<br/>({authError})</p>}
+          </div>
         </div>
-    </nav>
+      </div>
+    );
+  }
 
-    <!-- 소개 섹션 -->
-    <section id="intro" class="max-w-4xl mx-auto px-4 py-12 sm:py-20 text-center fade-in">
-        <div class="inline-block p-2 px-4 rounded-full bg-[#E9C46A]/20 text-[#96782E] text-sm font-semibold mb-4">
-            초등학교 보건 수업 프로젝트
-        </div>
-        <h2 class="text-4xl sm:text-5xl font-extrabold text-gray-900 mb-6 leading-tight">
-            작은 조각이 모여<br><span class="text-[#F28C8C]">하나의 우리</span>가 되다
-        </h2>
-        <p class="text-lg text-gray-600 mb-8 max-w-2xl mx-auto leading-relaxed">
-            그림책 <strong>'작은 조각 페체티노'</strong>를 읽고 나를 표현하는 조각을 찾았습니다.
-            친구들과 긍정의 말을 나누며 우리는 서로 연결되었습니다.
-        </p>
-    </section>
-
-    <!-- Phase 1: 나의 발견 -->
-    <section id="phase1" class="bg-white py-16 border-t border-gray-100">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-                <div class="order-2 lg:order-1">
-                    <div class="flex items-center gap-2 mb-4">
-                        <span class="bg-[#F28C8C] text-white w-8 h-8 rounded-full flex items-center justify-center font-bold">1</span>
-                        <h3 class="text-2xl font-bold text-gray-900">나를 발견하는 소중한 조각</h3>
-                    </div>
-                    
-                    <!-- 학생 정보 입력 -->
-                    <div class="bg-[#FDFBF7] p-6 rounded-2xl border border-gray-200 shadow-sm mb-6">
-                        <h4 class="font-bold text-gray-800 mb-3 border-b pb-2">✏️ 학생 정보 입력</h4>
-                        <div class="grid grid-cols-3 gap-3">
-                            <div><label class="block text-xs text-gray-500 mb-1">학년</label><input id="input-grade" type="number" class="detail-input" placeholder="5"></div>
-                            <div><label class="block text-xs text-gray-500 mb-1">반</label><input id="input-class" type="number" class="detail-input" placeholder="1"></div>
-                            <div><label class="block text-xs text-gray-500 mb-1">이름</label><input id="input-name" type="text" class="detail-input" placeholder="홍길동"></div>
-                        </div>
-                    </div>
-
-                    <!-- 질문 1 -->
-                    <div class="bg-[#FDFBF7] p-6 rounded-2xl border border-[#F28C8C]/20 shadow-sm">
-                        <h4 class="font-bold text-gray-800 mb-3">🤔 핵심 질문 1: 자기 이해</h4>
-                        <p class="text-sm text-gray-600 italic mb-4">"나를 표현하는 '작은 조각'을 선택하며 몰랐던 나의 어떤 모습을 발견했나요?"</p>
-                        <textarea id="reflection-q1" class="reflection-input" placeholder="여기에 답변을 적어주세요."></textarea>
-                    </div>
-                </div>
-
-                <!-- 조각 시뮬레이션 (우측) -->
-                <div class="order-1 lg:order-2 flex flex-col items-center justify-center bg-gray-50 p-8 rounded-3xl">
-                    <div id="piece-canvas" class="piece-base shape-circle shadow-lg mb-6 transition-all duration-500 text-4xl text-white">
-                        <span class="piece-icon">😀</span>
-                    </div>
-                    <!-- 모양 선택 -->
-                    <div class="w-full max-w-sm mb-4 grid grid-cols-3 gap-2">
-                        <button onclick="updatePiece('shape', 'shape-circle')" class="py-2 bg-gray-200 rounded text-sm">🔵 동그라미</button>
-                        <button onclick="updatePiece('shape', 'shape-triangle')" class="py-2 bg-gray-200 rounded text-sm">▲ 세모</button>
-                        <button onclick="updatePiece('shape', 'shape-square')" class="py-2 bg-gray-200 rounded text-sm">◼ 네모</button>
-                    </div>
-                    <!-- 색상 선택 -->
-                    <div class="w-full max-w-sm mb-4 grid grid-cols-8 gap-1">
-                        <button onclick="updatePiece('color', '#E74C3C')" class="h-8 rounded-full bg-[#E74C3C]"></button>
-                        <button onclick="updatePiece('color', '#E67E22')" class="h-8 rounded-full bg-[#E67E22]"></button>
-                        <button onclick="updatePiece('color', '#F1C40F')" class="h-8 rounded-full bg-[#F1C40F]"></button>
-                        <button onclick="updatePiece('color', '#27AE60')" class="h-8 rounded-full bg-[#27AE60]"></button>
-                        <button onclick="updatePiece('color', '#3498DB')" class="h-8 rounded-full bg-[#3498DB]"></button>
-                        <button onclick="updatePiece('color', '#5D5C8F')" class="h-8 rounded-full bg-[#5D5C8F]"></button>
-                        <button onclick="updatePiece('color', '#9B59B6')" class="h-8 rounded-full bg-[#9B59B6]"></button>
-                        <button onclick="updatePiece('color', '#333333')" class="h-8 rounded-full bg-[#333333]"></button>
-                    </div>
-                    <!-- 감정 선택 -->
-                    <div class="w-full max-w-sm grid grid-cols-5 gap-2">
-                        <button onclick="updatePiece('icon', '😀')" class="bg-white border rounded text-xl">😀</button>
-                        <button onclick="updatePiece('icon', '😂')" class="bg-white border rounded text-xl">😂</button>
-                        <button onclick="updatePiece('icon', '😊')" class="bg-white border rounded text-xl">😊</button>
-                        <button onclick="updatePiece('icon', '🤩')" class="bg-white border rounded text-xl">🤩</button>
-                        <button onclick="updatePiece('icon', '💪')" class="bg-white border rounded text-xl">💪</button>
-                        <button onclick="updatePiece('icon', '🤔')" class="bg-white border rounded text-xl">🤔</button>
-                        <button onclick="updatePiece('icon', '😭')" class="bg-white border rounded text-xl">😭</button>
-                        <button onclick="updatePiece('icon', '😠')" class="bg-white border rounded text-xl">😠</button>
-                        <button onclick="updatePiece('icon', '😴')" class="bg-white border rounded text-xl">😴</button>
-                        <button onclick="updatePiece('icon', '😇')" class="bg-white border rounded text-xl">😇</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Phase 2: 우리와 긍정 -->
-    <section id="phase2" class="py-16 bg-[#FDFBF7]">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6">
-            <div class="text-center mb-12">
-                <span class="bg-[#84A98C] text-white px-3 py-1 rounded-full text-xs font-bold">Phase 2</span>
-                <h3 class="text-3xl font-bold text-gray-900 mt-2">우리 함께 만드는 긍정의 힘</h3>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                    <h4 class="font-bold text-gray-800 mb-4 text-center">긍정 댓글 활동 효과</h4>
-                    <div class="chart-container"><canvas id="communityChart"></canvas></div>
-                </div>
-                <div class="flex flex-col justify-center space-y-6">
-                     <!-- 질문 2 -->
-                     <div class="bg-white p-6 rounded-2xl border-l-4 border-[#84A98C] shadow-sm">
-                        <h4 class="font-bold text-gray-800 mb-2">💬 핵심 질문 2: 관계</h4>
-                        <p class="text-sm text-gray-600 mb-3 italic">"친구들에게 긍정 댓글을 달아주었을 때, 나에게는 어떤 기분이 들었나요?"</p>
-                        <textarea id="reflection-q2" class="reflection-input" placeholder="답변을 적어주세요."></textarea>
-                    </div>
-                    <!-- 질문 3 -->
-                    <div class="bg-white p-6 rounded-2xl border-l-4 border-[#E9C46A] shadow-sm">
-                        <h4 class="font-bold text-gray-800 mb-2">🧩 핵심 질문 3: 공동체</h4>
-                        <p class="text-sm text-gray-600 mb-3 italic">"모두 다른 조각들이 모여 우리 반을 완성했어요. 나는 어떤 역할을 할 수 있을까요?"</p>
-                        <textarea id="reflection-q3" class="reflection-input" placeholder="답변을 적어주세요."></textarea>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 모자이크 그리드 -->
-            <div class="bg-white p-8 rounded-3xl shadow-inner text-center relative">
-                <h4 class="text-lg font-bold text-gray-800 mb-6">우리 반 조각 모아보기</h4>
-                <div id="mosaic-detail-display" class="hidden mb-6 bg-gray-50 p-4 rounded-xl border text-left"></div>
-                <div class="grid grid-cols-5 gap-2 max-w-3xl mx-auto" id="mosaic-grid"></div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Phase 3: 미래와 성장 -->
-    <section id="phase3" class="py-16 bg-white border-t border-gray-100">
-        <div class="max-w-4xl mx-auto px-4">
-            <div class="flex items-center gap-2 mb-8">
-                <span class="bg-[#E9C46A] text-white w-8 h-8 rounded-full flex items-center justify-center font-bold">3</span>
-                <h3 class="text-2xl font-bold text-gray-900">조각의 확장과 멋진 미래</h3>
-            </div>
-            
-            <div class="bg-[#FDFBF7] rounded-3xl p-8 md:p-12 relative overflow-hidden">
-                <!-- 질문 4 -->
-                <div class="mb-8 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                    <h5 class="font-bold text-gray-800 mb-2">📢 핵심 질문 4: 나의 외침</h5>
-                    <p class="text-sm text-gray-600 mb-4 italic">"나의 조각이 세상에 외칠 수 있다면, 그 말은 어떤 긍정적인 변화를 가져올까요?"</p>
-                    <textarea id="reflection-q4" class="reflection-input" placeholder="나의 한마디와 변화를 적어보세요."></textarea>
-                </div>
-
-                <!-- 성장 계획 -->
-                <div class="bg-white p-6 rounded-xl shadow-sm">
-                    <h5 class="font-bold text-gray-800 mb-3">🌱 나의 성장 다짐</h5>
-                    <textarea id="reflection-q_plan" class="reflection-input" placeholder="가장 소중한 깨달음과 앞으로의 성장 계획을 적어보세요."></textarea>
-                </div>
-                
-                <!-- 제출 버튼 -->
-                <div class="mt-8 text-center">
-                    <button onclick="submitReflection()" class="bg-[#F28C8C] text-white py-3 px-8 rounded-xl font-bold text-lg hover:bg-[#D47979] transition duration-300 shadow-lg transform hover:scale-105">
-                        ✅ 선생님께 제출하기
-                    </button>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- 교사 전용 출력 -->
-    <section class="max-w-4xl mx-auto px-4 py-8 text-center border-t-2 border-[#84A98C]">
-        <h3 class="text-xl font-bold text-gray-700 mb-4">👩‍🏫 교사 전용: 보고서 출력</h3>
-        <button onclick="generatePrintReport()" class="bg-[#3498DB] text-white py-2 px-6 rounded-xl font-semibold hover:bg-[#2980B9] shadow-md">
-            🖨️ 학생 답변 모아보기 (인쇄/PDF)
-        </button>
-    </section>
-
-    <!-- 인쇄용 컨테이너 -->
-    <div id="print-container" class="print-container hidden"></div>
-
-    <!-- 알림창 UI -->
-    <div id="custom-message-box" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white p-6 rounded-lg shadow-xl z-[100] text-center max-w-sm border-t-4 border-[#F28C8C] hidden">
-        <p id="custom-message-text" class="text-gray-800 font-medium whitespace-pre-wrap mb-4"></p>
-        <button onclick="closeMessageBox()" class="bg-[#F28C8C] text-white py-2 px-4 rounded-lg text-sm hover:bg-[#D47979]">확인</button>
+  return (
+    <div className="h-full w-full bg-gray-100 flex justify-center overflow-hidden">
+      <div className="w-full max-w-md bg-white h-full shadow-2xl relative flex flex-col">
+        {userType === 'student' ? (
+          <StudentView 
+            moodLogs={moodLogs} 
+            journals={journals}
+            setSosActive={setSosActive}
+            sosActive={sosActive}
+            onLogout={() => setUserType(null)}
+            db={db}
+            appId={appId}
+          />
+        ) : (
+          <TeacherView 
+            moodLogs={moodLogs} 
+            journals={journals}
+            onLogout={() => setUserType(null)}
+            db={db}
+            appId={appId}
+          />
+        )}
+      </div>
     </div>
+  );
+}
 
-    <!-- 자바스크립트 로직 -->
-    <script>
-        // --- 전역 유틸리티 함수 ---
-        function scrollToSection(id) {
-            const el = document.getElementById(id);
-            if (el) el.scrollIntoView({ behavior: 'smooth' });
-        }
+// --- 학생용 뷰 ---
+function StudentView({ moodLogs, journals, setSosActive, sosActive, onLogout, db, appId }) {
+  const [activeTab, setActiveTab] = useState('home');
+  const [todayMood, setTodayMood] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [latestMessage, setLatestMessage] = useState(null);
 
-        function showCustomMessage(msg) {
-            const box = document.getElementById('custom-message-box');
-            document.getElementById('custom-message-text').textContent = msg;
-            box.classList.remove('hidden');
-        }
-        function closeMessageBox() {
-            document.getElementById('custom-message-box').classList.add('hidden');
-        }
+  // 선생님 메시지 불러오기 (실시간)
+  useEffect(() => {
+    const msgQuery = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
+    const unsubscribe = onSnapshot(msgQuery, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => doc.data());
+      // 최신순 정렬
+      msgs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+      if (msgs.length > 0) {
+        setLatestMessage(msgs[0]);
+      }
+    });
+    return () => unsubscribe();
+  }, [db, appId]);
 
-        // --- 조각 시뮬레이션 로직 ---
-        const pieceCanvas = document.getElementById('piece-canvas');
-        const pieceIcon = pieceCanvas.querySelector('.piece-icon');
-        let pieceState = { shape: 'shape-circle', color: '#E74C3C', icon: '😀' };
+  const handleMoodSelect = async (moodItem) => {
+    setIsSaving(true);
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'mood_logs'), {
+        mood: moodItem.id,
+        note: '', // 추후 노트 추가 가능
+        date: new Date().toLocaleDateString(),
+        timestamp: serverTimestamp(),
+        studentName: '지은'
+      });
+      setTodayMood(moodItem);
+    } catch (e) {
+      alert("저장에 실패했어요. 다시 시도해주세요.");
+    }
+    setIsSaving(false);
+  };
 
-        function updatePiece(type, value) {
-            // 초기화
-            pieceCanvas.className = `piece-base ${pieceState.shape} shadow-lg mb-6 transition-all duration-500 text-4xl text-white flex items-center justify-center`;
-            pieceCanvas.style = ""; // 인라인 스타일 초기화
-            pieceCanvas.style.backgroundColor = pieceState.color;
+  return (
+    <div className="flex-1 flex flex-col relative bg-amber-50/30">
+      <header className="p-6 pt-12 flex justify-between items-center bg-white shadow-sm rounded-b-3xl z-10">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">안녕, 지은아! 👋</h2>
+          <p className="text-gray-500 text-sm">오늘도 너는 소중한 사람이야.</p>
+        </div>
+        <button onClick={onLogout} className="text-gray-400 hover:text-gray-600">
+          <LogOut size={20} />
+        </button>
+      </header>
 
-            if (type === 'shape') {
-                pieceState.shape = value;
-                pieceCanvas.classList.remove('shape-circle', 'shape-square', 'shape-triangle');
-                pieceCanvas.classList.add(value);
-            } else if (type === 'color') pieceState.color = value;
-            else if (type === 'icon') { pieceState.icon = value; pieceIcon.textContent = value; }
+      <main className="flex-1 overflow-y-auto p-6 space-y-6 pb-24">
+        <button 
+          onClick={() => setSosActive(true)}
+          className="w-full bg-red-100 hover:bg-red-200 text-red-600 p-4 rounded-2xl flex items-center justify-center gap-2 font-bold shadow-sm transition-all animate-pulse"
+        >
+          <AlertCircle size={24} />
+          지금 마음이 너무 힘들어요 (SOS)
+        </button>
 
-            // 세모일 경우 특수 처리
-            if (pieceState.shape === 'shape-triangle') {
-                pieceCanvas.style.backgroundColor = 'transparent';
-                pieceCanvas.style.width = '0'; pieceCanvas.style.height = '0';
-                pieceCanvas.style.borderLeft = '90px solid transparent';
-                pieceCanvas.style.borderRight = '90px solid transparent';
-                pieceCanvas.style.borderBottom = `150px solid ${pieceState.color}`;
-                pieceIcon.style.top = '60%'; // 아이콘 위치 조정
-            } else {
-                pieceCanvas.style.backgroundColor = pieceState.color;
-                pieceIcon.style.top = '50%';
-            }
+        {activeTab === 'home' && (
+          <div className="space-y-6 animate-fade-in">
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+              <h3 className="text-lg font-semibold mb-4 text-gray-700">오늘 너의 마음 색깔은?</h3>
+              {todayMood ? (
+                <div className={`p-6 rounded-2xl ${todayMood.color} text-center space-y-2`}>
+                  <div className="text-3xl">✨</div>
+                  <p className="font-bold text-gray-800 text-lg">{todayMood.text}</p>
+                  <p className="text-gray-800/80 text-sm">{todayMood.message}</p>
+                  <button 
+                    onClick={() => setTodayMood(null)} 
+                    className="text-xs text-gray-600 underline mt-2 block w-full"
+                  >
+                    다시 선택하기
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-5 gap-2">
+                  {MOOD_COLORS.map((mood) => (
+                    <button
+                      key={mood.id}
+                      disabled={isSaving}
+                      onClick={() => handleMoodSelect(mood)}
+                      className={`h-14 w-full rounded-2xl ${mood.color} hover:opacity-80 transition-transform hover:scale-110 shadow-sm disabled:opacity-50`}
+                      aria-label={mood.text}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
 
-            // 노란색일 경우 글자 검정색
-            if (pieceState.color === '#F1C40F') pieceIcon.classList.replace('text-white', 'text-black');
-            else pieceIcon.classList.replace('text-black', 'text-white');
-
-            // 애니메이션
-            pieceCanvas.classList.remove('bounce');
-            void pieceCanvas.offsetWidth;
-            pieceCanvas.classList.add('bounce');
-        }
-
-        // --- Firebase 제출 로직 ---
-        async function submitReflection() {
-            if (!window.db) {
-                showCustomMessage('⚠️ 데이터베이스가 연결되지 않았습니다.\n(코드 상단의 config를 확인하세요)');
-                return;
-            }
-
-            const grade = document.getElementById('input-grade').value;
-            const classNum = document.getElementById('input-class').value;
-            const name = document.getElementById('input-name').value;
-            const q1 = document.getElementById('reflection-q1').value;
-            const q2 = document.getElementById('reflection-q2').value;
-            const q3 = document.getElementById('reflection-q3').value;
-            const q4 = document.getElementById('reflection-q4').value;
-            const q_plan = document.getElementById('reflection-q_plan').value;
-
-            if (!grade || !classNum || !name) { showCustomMessage('학년, 반, 이름을 입력해주세요!'); return; }
-            if (!q1 || !q2 || !q3 || !q4 || !q_plan) { showCustomMessage('모든 질문에 답을 적어주세요!'); return; }
-
-            try {
-                const { collection, addDoc, serverTimestamp } = window.firebaseFunctions;
-                // 'student_reflections' 라는 이름의 저장소에 저장
-                await addDoc(collection(window.db, "student_reflections"), {
-                    grade, classNum, name,
-                    q1, q2, q3, q4, q_plan,
-                    timestamp: serverTimestamp(),
-                    userId: window.userId || 'anonymous'
-                });
-                showCustomMessage(`🎉 ${name} 학생의 답변이 제출되었습니다!`);
-                
-                // 입력창 비우기
-                document.querySelectorAll('input, textarea').forEach(el => el.value = '');
-            } catch (e) {
-                console.error(e);
-                showCustomMessage('❌ 제출 실패: ' + e.message);
-            }
-        }
-
-        // --- 교사 출력 로직 ---
-        async function generatePrintReport() {
-            if (!window.db) { showCustomMessage('DB 연결 안됨'); return; }
-            const container = document.getElementById('print-container');
-            container.innerHTML = '<div class="text-center p-10">데이터를 불러오는 중...</div>';
-            container.classList.remove('hidden');
-
-            try {
-                const { collection, getDocs, query } = window.firebaseFunctions;
-                const snap = await getDocs(query(collection(window.db, "student_reflections")));
-                
-                if (snap.empty) {
-                    showCustomMessage('저장된 학생 답변이 없습니다.');
-                    container.classList.add('hidden');
-                    return;
+            <div className="bg-blue-50 p-6 rounded-3xl shadow-sm border border-blue-100 relative overflow-hidden transition-all duration-500">
+              <div className="absolute -right-4 -top-4 bg-blue-100 w-24 h-24 rounded-full opacity-50"></div>
+              <h3 className="text-lg font-semibold mb-2 text-blue-800 flex items-center gap-2">
+                <Heart size={18} className="fill-blue-800" /> 선생님의 응원
+              </h3>
+              <p className="text-blue-900 leading-relaxed font-medium">
+                {latestMessage 
+                  ? `"${latestMessage.text}"` 
+                  : `"지은아, 어제 체육 시간에 친구를 도와주는 모습이 정말 멋지더라. 힘든 일이 있으면 언제든 '빈 의자'에 털어놓으렴. 선생님은 늘 네 편이야."`
                 }
+              </p>
+              <p className="text-right text-xs text-blue-400 mt-2">
+                - {latestMessage ? '보건 선생님 (새 메시지)' : '보건 선생님'} -
+              </p>
+            </div>
+          </div>
+        )}
 
-                let html = '<h1 style="text-align:center; padding:20px;">[마음 봄] 학생 성찰 보고서</h1>';
-                
-                // 데이터 정렬 (학년-반-이름 순)
-                const docs = [];
-                snap.forEach(d => docs.push(d.data()));
-                docs.sort((a,b) => (a.classNum - b.classNum) || a.name.localeCompare(b.name));
+        {activeTab === 'meditation' && <MeditationPlayer />}
+        
+        {activeTab === 'journal' && <JournalEditor db={db} appId={appId} />}
 
-                docs.forEach(data => {
-                    html += `
-                        <div class="print-report-card">
-                            <div class="print-header">${data.grade}학년 ${data.classNum}반 ${data.name}</div>
-                            <h4>1. 자기 이해</h4><p>${data.q1}</p>
-                            <h4>2. 관계</h4><p>${data.q2}</p>
-                            <h4>3. 공동체</h4><p>${data.q3}</p>
-                            <h4>4. 나의 외침</h4><p>${data.q4}</p>
-                            <h4>5. 성장 다짐</h4><p>${data.q_plan}</p>
-                        </div>
-                    `;
-                });
+      </main>
 
-                container.innerHTML = html;
-                setTimeout(() => { window.print(); container.classList.add('hidden'); }, 1000);
+      {sosActive && (
+        <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-6 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white w-full rounded-3xl p-8 space-y-6 text-center animate-bounce-in relative">
+            <button 
+              onClick={() => setSosActive(false)}
+              className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <X size={24} />
+            </button>
+            <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto">
+              <Phone size={32} />
+            </div>
+            <div>
+              <h3 className="text-2xl font-bold text-gray-800 mb-2">혼자가 아니야</h3>
+              <p className="text-gray-500">지금 바로 목소리를 들려줄래?</p>
+            </div>
+            <div className="space-y-3">
+              <button className="w-full py-4 bg-pink-500 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-pink-600 transition-colors">
+                엄마에게 전화하기
+              </button>
+              <button className="w-full py-4 bg-gray-200 text-gray-700 rounded-xl font-bold text-lg hover:bg-gray-300 transition-colors">
+                상담센터 (1388) 연결
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-            } catch (e) {
-                console.error(e);
-                showCustomMessage('불러오기 실패: ' + e.message);
-                container.classList.add('hidden');
-            }
-        }
+      <nav className="absolute bottom-0 w-full bg-white border-t border-gray-100 flex justify-around items-center p-4 pb-8 rounded-t-3xl shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+        <NavButton active={activeTab === 'home'} onClick={() => setActiveTab('home')} icon={<Heart size={24} />} label="홈" />
+        <NavButton active={activeTab === 'meditation'} onClick={() => setActiveTab('meditation')} icon={<Wind size={24} />} label="호흡/명상" />
+        <NavButton active={activeTab === 'journal'} onClick={() => setActiveTab('journal')} icon={<BookOpen size={24} />} label="마음일기" />
+      </nav>
+    </div>
+  );
+}
 
-        // --- 차트 및 모자이크 초기화 ---
-        document.addEventListener('DOMContentLoaded', () => {
-            // 차트 그리기
-            new Chart(document.getElementById('communityChart'), {
-                type: 'radar',
-                data: {
-                    labels: ['자아존중감', '친밀감', '소속감', '공감', '표현력'],
-                    datasets: [{
-                        label: '활동 전', data: [3, 3, 2, 3, 3],
-                        borderColor: '#ccc', backgroundColor: 'rgba(200,200,200,0.2)'
-                    }, {
-                        label: '활동 후', data: [5, 4.5, 4.8, 5, 4.5],
-                        borderColor: '#84A98C', backgroundColor: 'rgba(132, 169, 140, 0.2)'
-                    }]
-                },
-                options: { scales: { r: { suggestedMin: 0, suggestedMax: 5 } } }
-            });
+// --- 선생님용 뷰 ---
+function TeacherView({ moodLogs, journals, onLogout, db, appId }) {
+  const dangerSignals = moodLogs.filter(log => log.mood === 'sad' || log.mood === 'angry').length;
+  const [message, setMessage] = useState('');
 
-            // 모자이크 생성 (단순 시각용)
-            const grid = document.getElementById('mosaic-grid');
-            const colors = ['#E74C3C', '#E67E22', '#F1C40F', '#27AE60', '#3498DB', '#9B59B6'];
-            for(let i=1; i<=20; i++) {
-                const div = document.createElement('div');
-                div.className = "h-12 rounded bg-opacity-80 flex items-center justify-center text-white font-bold cursor-pointer hover:scale-110 transition";
-                div.style.backgroundColor = colors[i % colors.length];
-                div.innerText = i;
-                div.onclick = () => showCustomMessage(`${i}번 조각을 선택했습니다!`);
-                grid.appendChild(div);
-            }
+  const handleSendMessage = async () => {
+    if(!message.trim()) return;
+    try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+            text: message,
+            timestamp: serverTimestamp(),
+            sender: 'teacher',
+            receiver: 'student'
         });
-    </script>
-</body>
-</html>
+        alert("지은이에게 응원 메시지가 실제로 전송되었습니다!");
+        setMessage('');
+    } catch (e) {
+        console.error(e);
+        alert("전송 실패: " + e.message);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col bg-slate-50">
+      <header className="p-6 pt-12 bg-white shadow-sm flex justify-between items-center">
+        <div>
+          <h2 className="text-xl font-bold text-slate-800">👩‍🏫 학생 케어 대시보드</h2>
+          <p className="text-sm text-slate-500 flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+            실시간 연동중 • 김지은 학생
+          </p>
+        </div>
+        <button onClick={onLogout} className="text-gray-400 hover:text-gray-600">
+          <LogOut size={20} />
+        </button>
+      </header>
+
+      <main className="p-6 space-y-6 overflow-y-auto pb-10">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+            <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">최근 감정 상태</h4>
+            <div className="flex items-end gap-1 h-16">
+               {moodLogs.slice(0, 5).map((log, idx) => {
+                 const colorClass = MOOD_COLORS.find(c => c.id === log.mood)?.color || 'bg-gray-200';
+                 return (
+                   <div key={idx} className={`flex-1 rounded-t-lg ${colorClass} opacity-80 h-full`} title={log.date}></div>
+                 )
+               })}
+               {moodLogs.length === 0 && <div className="text-xs text-gray-300 w-full text-center self-center">기록 대기중</div>}
+            </div>
+            <p className="text-xs text-slate-400 mt-2 text-right">실시간 반영됨</p>
+          </div>
+          
+          <div className={`p-5 rounded-2xl shadow-sm border ${dangerSignals > 0 ? 'bg-red-50 border-red-100' : 'bg-emerald-50 border-emerald-100'}`}>
+            <h4 className={`text-xs font-bold uppercase mb-2 ${dangerSignals > 0 ? 'text-red-400' : 'text-emerald-400'}`}>관심 필요 지수</h4>
+            <div className="flex items-center gap-2 mt-2">
+              <AlertCircle size={28} className={dangerSignals > 0 ? 'text-red-500' : 'text-emerald-500'} />
+              <span className={`text-2xl font-bold ${dangerSignals > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                {dangerSignals > 0 ? '주의' : '안정'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-4 border-b border-slate-50 flex justify-between items-center">
+            <h3 className="font-bold text-slate-700">📋 실시간 활동 기록</h3>
+          </div>
+          <div className="divide-y divide-slate-50 max-h-60 overflow-y-auto">
+            {/* 감정 로그와 일기를 합쳐서 보여줌 (간단히 구현) */}
+            {moodLogs.map((log, idx) => {
+              const moodData = MOOD_COLORS.find(c => c.id === log.mood);
+              return (
+                <div key={log.id} className="p-4 hover:bg-slate-50 transition-colors animate-fade-in">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className={`w-3 h-3 rounded-full ${moodData?.color}`}></div>
+                    <span className="text-sm font-semibold text-slate-700">감정 체크</span>
+                    <span className="text-xs text-slate-400 ml-auto">
+                      {log.timestamp ? new Date(log.timestamp.seconds * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '방금 전'}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-600 pl-6 border-l-2 border-slate-100">
+                     <span className="font-medium text-slate-800">[{moodData?.text}]</span> 를 선택했습니다.
+                  </p>
+                </div>
+              );
+            })}
+             {moodLogs.length === 0 && <div className="p-8 text-center text-slate-400">아직 활동 기록이 없습니다.</div>}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+           <h3 className="font-bold text-slate-700 mb-3">💌 격려 메시지 보내기</h3>
+           <textarea 
+             value={message}
+             onChange={(e) => setMessage(e.target.value)}
+             className="w-full bg-slate-50 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
+             rows="3"
+             placeholder="지은이에게 따뜻한 한마디를 적어주세요..."
+           ></textarea>
+           <button 
+             onClick={handleSendMessage}
+             className="w-full mt-3 bg-blue-500 text-white py-3 rounded-xl font-bold shadow-md hover:bg-blue-600 transition-colors flex items-center justify-center gap-2"
+           >
+             <Send size={18} /> 메시지 전송
+           </button>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// --- 하위 컴포넌트: 명상 플레이어 ---
+function MeditationPlayer() {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [timer, setTimer] = useState(180); 
+  const [scriptIndex, setScriptIndex] = useState(0);
+
+  useEffect(() => {
+    let interval;
+    if (isPlaying && timer > 0) {
+      interval = setInterval(() => {
+        setTimer((prev) => prev - 1);
+        if(timer % 10 === 0 && scriptIndex < MEDITATION_SCRIPTS.length - 1) {
+             setScriptIndex(prev => (prev + 1) % MEDITATION_SCRIPTS.length);
+        }
+      }, 1000);
+    } else if (timer === 0) {
+      setIsPlaying(false);
+    }
+    return () => clearInterval(interval);
+  }, [isPlaying, timer, scriptIndex]);
+
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  return (
+    <div className="h-full flex flex-col items-center justify-center space-y-8 p-4">
+      <div className="text-center space-y-2">
+        <h3 className="text-2xl font-bold text-gray-700">뇌호흡 명상</h3>
+        <p className="text-gray-500 text-sm">아로마 향을 느끼며 호흡에 집중해봐요.</p>
+      </div>
+      <div className="relative flex items-center justify-center">
+        <div className={`w-48 h-48 rounded-full bg-emerald-100 flex items-center justify-center transition-all duration-[4000ms] ease-in-out ${isPlaying ? 'scale-125 bg-emerald-200' : 'scale-100'}`}>
+          <div className={`w-32 h-32 rounded-full bg-emerald-300 flex items-center justify-center transition-all duration-[4000ms] ease-in-out ${isPlaying ? 'scale-110 opacity-80' : 'scale-100 opacity-100'}`}>
+            <span className="text-3xl font-mono font-bold text-white drop-shadow-md">
+              {formatTime(timer)}
+            </span>
+          </div>
+        </div>
+        {isPlaying && (
+           <div className="absolute -bottom-12 text-sm text-emerald-600 animate-pulse font-medium bg-emerald-50 px-3 py-1 rounded-full">
+             🌿 숨을 들이마시고... 내쉬세요...
+           </div>
+        )}
+      </div>
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 w-full text-center min-h-[80px] flex items-center justify-center">
+        <p className="text-gray-600 font-medium">"{MEDITATION_SCRIPTS[scriptIndex]}"</p>
+      </div>
+      <button 
+        onClick={() => setIsPlaying(!isPlaying)}
+        className={`rounded-full p-6 shadow-lg transition-transform hover:scale-105 active:scale-95 ${isPlaying ? 'bg-orange-100 text-orange-500' : 'bg-emerald-500 text-white'}`}
+      >
+        {isPlaying ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" className="ml-1" />}
+      </button>
+    </div>
+  );
+}
+
+// --- 하위 컴포넌트: 감정 일기 (빈 의자 기법 - DB 저장 연동) ---
+function JournalEditor({ db, appId }) {
+  const [mode, setMode] = useState('gratitude'); 
+  const [text, setText] = useState('');
+  const [recentLogs, setRecentLogs] = useState([]);
+
+  // 내 로컬에서 작성한 내용만 잠깐 보여주기 위한 state (실제로는 전체 리스트에서 필터링해서 보여주는게 좋음)
+  
+  const handleSave = async () => {
+    if (!text.trim()) return;
+    try {
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'journals'), {
+        type: mode,
+        text: text,
+        date: new Date().toLocaleDateString(),
+        timestamp: serverTimestamp(),
+        studentName: '지은'
+      });
+      
+      setRecentLogs([{id: docRef.id, text, date: '방금', type: mode}, ...recentLogs]);
+      setText('');
+      alert(mode === 'gratitude' ? '감사 일기가 저장되었어요! 꽃이 피어났습니다. 🌸' : '속마음을 털어놓으니 한결 가벼워졌나요? 잘했어요.');
+    } catch (e) {
+      console.error(e);
+      alert("저장 중 오류가 발생했습니다.");
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col space-y-4">
+      <div className="flex bg-white p-1 rounded-2xl border border-gray-200">
+        <button 
+          onClick={() => setMode('gratitude')}
+          className={`flex-1 py-2 rounded-xl text-sm font-bold transition-colors ${mode === 'gratitude' ? 'bg-yellow-100 text-yellow-700' : 'text-gray-400 hover:bg-gray-50'}`}
+        >
+          🙏 감사 일기
+        </button>
+        <button 
+          onClick={() => setMode('emptyChair')}
+          className={`flex-1 py-2 rounded-xl text-sm font-bold transition-colors ${mode === 'emptyChair' ? 'bg-purple-100 text-purple-700' : 'text-gray-400 hover:bg-gray-50'}`}
+        >
+          🪑 속마음 의자
+        </button>
+      </div>
+
+      <div className="flex-1 bg-white rounded-3xl p-6 shadow-sm border border-gray-100 flex flex-col">
+        <div className="mb-4">
+          <h3 className="text-lg font-bold text-gray-800">
+            {mode === 'gratitude' ? '오늘 감사한 일을 찾아볼까요?' : '빈 의자에 앉아 속마음을 말해봐요.'}
+          </h3>
+          <p className="text-sm text-gray-400">
+            {mode === 'gratitude' ? '아주 사소한 것도 괜찮아요.' : '누구에게도 말하지 못한 이야기, 여기서 다 털어놓으세요.'}
+          </p>
+        </div>
+
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          className="flex-1 w-full resize-none focus:outline-none text-gray-600 leading-relaxed placeholder-gray-300"
+          placeholder={mode === 'gratitude' ? "예: 오늘 급식에 맛있는 반찬이 나와서 좋았다." : "지금 내 앞에 엄마가/친구가 앉아있다고 상상해봐. 하고 싶은 말을 적어보자..."}
+        ></textarea>
+
+        <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-100">
+           <button className="p-3 text-gray-400 hover:bg-gray-100 rounded-full">
+             <Mic size={20} />
+           </button>
+           <button 
+             onClick={handleSave}
+             className={`px-6 py-2 rounded-full text-white font-bold shadow-md transition-transform active:scale-95 ${mode === 'gratitude' ? 'bg-yellow-400 hover:bg-yellow-500' : 'bg-purple-400 hover:bg-purple-500'}`}
+           >
+             저장하기
+           </button>
+        </div>
+      </div>
+      
+      <div className="h-32 overflow-y-auto space-y-2">
+        {recentLogs.filter(j => j.type === mode).map(j => (
+          <div key={j.id} className="bg-white p-3 rounded-xl text-sm text-gray-600 border border-gray-100 truncate animate-fade-in">
+            <span className="text-xs text-gray-400 mr-2">{j.date}</span>
+            {j.text}
+          </div>
+        ))}
+         {recentLogs.length === 0 && <div className="text-center text-xs text-gray-300 py-4">방금 쓴 내용이 여기에 나타나요</div>}
+      </div>
+    </div>
+  );
+}
+
+function NavButton({ active, onClick, icon, label }) {
+  return (
+    <button 
+      onClick={onClick}
+      className={`flex flex-col items-center gap-1 transition-all duration-300 ${active ? 'text-gray-800 -translate-y-2' : 'text-gray-300'}`}
+    >
+      <div className={`p-2 rounded-2xl ${active ? 'bg-yellow-300 shadow-md' : 'bg-transparent'}`}>
+        {icon}
+      </div>
+      <span className="text-[10px] font-bold">{label}</span>
+    </button>
+  );
+}
